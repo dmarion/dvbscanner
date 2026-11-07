@@ -118,6 +118,27 @@ fn parse_fec(s: &str) -> Result<u32> {
     })
 }
 
+/// Short display name for a detected code rate. `-` for anything that isn't
+/// an actual rate, FEC_AUTO included.
+pub fn fec_name(fec: Option<u32>) -> &'static str {
+    match fec {
+        Some(ioctl::FEC_1_2) => "1/2",
+        Some(ioctl::FEC_2_3) => "2/3",
+        Some(ioctl::FEC_3_4) => "3/4",
+        Some(ioctl::FEC_4_5) => "4/5",
+        Some(ioctl::FEC_5_6) => "5/6",
+        Some(ioctl::FEC_6_7) => "6/7",
+        Some(ioctl::FEC_7_8) => "7/8",
+        Some(ioctl::FEC_8_9) => "8/9",
+        Some(ioctl::FEC_3_5) => "3/5",
+        Some(ioctl::FEC_9_10) => "9/10",
+        Some(ioctl::FEC_2_5) => "2/5",
+        Some(ioctl::FEC_1_3) => "1/3",
+        Some(ioctl::FEC_1_4) => "1/4",
+        _ => "-",
+    }
+}
+
 fn parse_modulation(s: &str) -> Result<u32> {
     Ok(match s.to_uppercase().as_str() {
         "QPSK" => ioctl::QPSK,

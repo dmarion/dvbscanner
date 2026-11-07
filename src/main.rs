@@ -4,6 +4,7 @@ mod debug;
 mod frontend;
 mod input;
 mod ioctl;
+mod margin;
 mod monitor;
 mod nit;
 mod sdt;

@@ -14,6 +14,7 @@ use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState};
 use crate::frontend::{self, Frontend};
 use crate::ioctl::{self, Stat};
 use crate::input::InputConfig;
+use crate::margin;
 use crate::monitor::{self, GraphVisibility, MonitorHistory};
 use crate::nit;
 use crate::sdt;
@@ -55,6 +56,14 @@ pub(crate) struct Entry {
     /// Bit errors FEC has fixed since tune (pre-FEC minus post-FEC error
     /// count) - cumulative, like `blocks`, not a per-tick delta.
     pub(crate) corrected: Stat,
+    /// Code rate read back from the demodulator while locked. Kept between
+    /// visits like the stats above, and cleared once a visit ends without
+    /// lock - see `App::advance`.
+    detected_fec: Option<u32>,
+    /// Modulation read back the same way. Unlike `tp.modulation`, which
+    /// keeps whatever the config says on satellite rows, this is only ever
+    /// the demodulator's answer, so margin is computed from it.
+    detected_modulation: Option<u32>,
     /// Confirmed/displayed NIT - kept for as long as we stay locked (not
     /// reset on every tick while still locked, so we don't re-fetch it on
     /// every scan lap once known). Cleared only once a visit to this row
@@ -247,6 +256,8 @@ impl App {
                 blocks: Stat::Unavailable,
                 total_blocks: Stat::Unavailable,
                 corrected: Stat::Unavailable,
+                detected_fec: None,
+                detected_modulation: None,
                 nit: None,
                 nit_staging: None,
                 sdt: None,
@@ -397,6 +408,8 @@ impl App {
             self.rows[leaving].nit_staging = None;
             self.rows[leaving].sdt = None;
             self.rows[leaving].sdt_staging = None;
+            self.rows[leaving].detected_fec = None;
+            self.rows[leaving].detected_modulation = None;
             if !self.rows[leaving].tp.system.is_satellite() {
                 self.rows[leaving].tp.modulation = ioctl::QAM_AUTO;
             }
@@ -467,11 +480,18 @@ impl App {
             }
         }
         if self.rows[idx].locked
-            && self.rows[idx].tp.modulation == ioctl::QAM_AUTO
             && let Ok(m) = self.fe.modulation()
             && m != ioctl::QAM_AUTO
         {
-            self.rows[idx].tp.modulation = m;
+            self.rows[idx].detected_modulation = Some(m);
+            if self.rows[idx].tp.modulation == ioctl::QAM_AUTO {
+                self.rows[idx].tp.modulation = m;
+            }
+        }
+        if self.rows[idx].locked
+            && let Some(fec) = self.fe.detected_fec(self.rows[idx].tp.system.is_satellite())
+        {
+            self.rows[idx].detected_fec = Some(fec);
         }
     }
 
@@ -634,81 +654,15 @@ pub(crate) const WARN: Color = Color::Yellow;
 pub(crate) const BAD: Color = Color::Red;
 pub(crate) const DIM: Color = Color::DarkGray;
 
-/// Rough (good, warn) CNR thresholds in dB for a given DTV_MODULATION.
-/// `warn` sits at the modulation's QEF (quasi-error-free) CNR floor for a
-/// representative, commonly-used FEC rate - 3/4 for the DVB-S/S2 entries
-/// (ETSI EN 302307 Annex A/C reference tables), 2/3 for the DVB-T2 QAM
-/// entries (the typical broadcast default). `good` is a flat 1.5 dB above
-/// that: enough margin to call it comfortable without demanding so much
-/// headroom that a solid, error-free lock still shows as merely "ok".
-///
-/// This can't be exact for every FEC rate actually in use (we only key on
-/// modulation here), but 3/4 and 2/3 are representative enough to be a
-/// sane single default per modulation rather than guessing one global
-/// cutoff for every modulation alike - e.g. QPSK locks cleanly under 5 dB
-/// where 256-QAM needs nearly 20 dB.
-///
-/// The QAM_* entries are DVB-T2 figures specifically (our tool never
-/// produces a QAM_* modulation for anything but T/T2 - DVB-C isn't
-/// supported). That matters: DVB-C uses plain Reed-Solomon FEC and needs
-/// much higher CNR for a given constellation (e.g. ~30 dB for 256-QAM),
-/// while T2 uses the same LDPC+BCH coding family as DVB-S2 and locks
-/// cleanly around 20 dB for 256-QAM. Using DVB-C-style thresholds here
-/// would paint a perfectly healthy, error-free T2 lock as red. QAM_128
-/// isn't an actual DVB-T2 constellation - it's kept only as an
-/// interpolated placeholder in case a driver ever reports it.
-fn cnr_thresholds(modulation: u32) -> Option<(f64, f64)> {
-    use crate::ioctl::*;
-    Some(match modulation {
-        QPSK => (5.5, 4.0),
-        PSK_8 => (9.0, 7.5),
-        APSK_16 => (11.5, 10.0),
-        APSK_32 => (14.0, 12.5),
-        QAM_16 => (12.0, 10.5),
-        QAM_64 => (17.5, 16.0),
-        QAM_128 => (19.5, 18.0),
-        QAM_256 => (21.0, 19.5),
-        _ => return None,
-    })
-}
-
-/// Quality color for CNR, aware of the modulation in use. Not used for
-/// signal strength: that's a raw dBm-ish power level with no universal
-/// "good" threshold (it depends on driver/tuner calibration), unlike CNR
-/// where higher is always better once you know the modulation.
-fn cnr_style(modulation: u32, s: Stat) -> Style {
-    match s {
-        Stat::Decibel(v) => {
-            let db = v as f64 / 1000.0;
-            match cnr_thresholds(modulation) {
-                Some((good, warn)) => {
-                    let c = if db >= good {
-                        GOOD
-                    } else if db >= warn {
-                        WARN
-                    } else {
-                        BAD
-                    };
-                    Style::new().fg(c)
-                }
-                // Modulation is AUTO or unrecognized (e.g. T/T2, where we
-                // don't know what the demod actually settled on) - don't
-                // pretend to judge quality against the wrong scale.
-                None => Style::new(),
-            }
-        }
-        Stat::Relative(v) => {
-            let pct = v as f64 / 65535.0 * 100.0;
-            let c = if pct >= 60.0 {
-                GOOD
-            } else if pct >= 30.0 {
-                WARN
-            } else {
-                BAD
-            };
-            Style::new().fg(c)
-        }
-        _ => Style::new().fg(DIM),
+/// Colors a margin in dB. Below zero is under the spec's threshold. The 1 and
+/// 3 dB steps are judgement calls, not from a spec: real receivers typically
+/// lose some of the ideal figure, and a small margin leaves little for rain.
+fn margin_style(margin: Option<f64>) -> Style {
+    match margin {
+        Some(m) if m >= 3.0 => Style::new().fg(GOOD),
+        Some(m) if m >= 1.0 => Style::new().fg(WARN),
+        Some(_) => Style::new().fg(BAD),
+        None => Style::new().fg(DIM),
     }
 }
 
@@ -727,12 +681,15 @@ pub(crate) fn sat_letter(position: u8) -> char {
     (b'A' + position.min(25)) as char
 }
 
+/// Width of the main table's columns plus the spacing between them.
+const TABLE_MIN_WIDTH: u16 = 118;
+
 fn ui(f: &mut Frame, app: &mut App) {
     let area = f.area();
     let chunks = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(area);
 
     let header = Row::new(vec![
-        "Sys", "Pos", "Freq", "Pol", "Mod", "SR", "Lock", "Signal", "CNR", "BER", "Blk", "Network",
+        "Sys", "Pos", "   Freq", "Pol", "Mod", "SR", "FEC", "Lock", "Signal", "CNR", "Margin", "BER", "Blk", "Network",
     ])
     .style(Style::new().fg(ACCENT).bold());
 
@@ -772,13 +729,15 @@ fn ui(f: &mut Frame, app: &mut App) {
                 Style::new()
             };
             let scanning = i == app.active && !e.locked;
-            let cnr_sty = if scanning {
+            let margin = margin::margin_db(e.tp.system, e.detected_modulation, e.detected_fec, e.cnr);
+            let margin_sty = if scanning {
                 // Still settling, not locked yet - this reading isn't a
                 // meaningful quality signal, so don't paint it red/green.
                 Style::new()
             } else {
-                cnr_style(e.tp.modulation, e.cnr)
+                margin_style(margin)
             };
+            let margin_text = margin.map_or_else(|| "-".to_string(), |m| format!("{m:+.1}"));
             let marker = if i == app.active { "*" } else { " " };
             let pos = if e.tp.system.is_satellite() {
                 sat_letter(e.tp.position).to_string()
@@ -794,13 +753,15 @@ fn ui(f: &mut Frame, app: &mut App) {
             Row::new(vec![
                 Cell::from(format!("{marker}{}", e.tp.system)),
                 Cell::from(pos),
-                Cell::from(format!("{}", e.tp.display_frequency)),
+                Cell::from(format!("{:7.1}", e.tp.display_frequency)),
                 Cell::from(pol),
                 Cell::from(transponder::modulation_name(e.tp.modulation)),
                 Cell::from(sr),
+                Cell::from(transponder::fec_name(e.detected_fec)),
                 Cell::from(lock).style(lock_style),
                 Cell::from(frontend::fmt_stat(e.signal)),
-                Cell::from(frontend::fmt_stat(e.cnr)).style(cnr_sty),
+                Cell::from(frontend::fmt_stat(e.cnr)),
+                Cell::from(margin_text).style(margin_sty),
                 Cell::from(frontend::fmt_ber(e.ber)).style(ber_style(e.ber)),
                 Cell::from(frontend::fmt_blocks(e.blocks)),
                 Cell::from(network),
@@ -809,16 +770,26 @@ fn ui(f: &mut Frame, app: &mut App) {
         })
         .collect();
 
+    // On a terminal too narrow to fit every column, the layout shrinks all
+    // `Length`s - `Min` keeps Freq readable, but would also grow to soak up
+    // spare room on a wider one, so it's only used when actually short.
+    let freq_width = if chunks[0].width < TABLE_MIN_WIDTH {
+        Constraint::Min(7)
+    } else {
+        Constraint::Length(7)
+    };
     let widths = [
         Constraint::Length(4),
         Constraint::Length(4),
-        Constraint::Length(8),
+        freq_width,
         Constraint::Length(4),
         Constraint::Length(7),
         Constraint::Length(7),
+        Constraint::Length(4),
         Constraint::Length(6),
         Constraint::Length(12),
         Constraint::Length(12),
+        Constraint::Length(6),
         Constraint::Length(10),
         Constraint::Length(6),
         Constraint::Length(16),

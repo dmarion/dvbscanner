@@ -1,0 +1,78 @@
+# Example dvbscanner configuration: HotBird (13E) only.
+#
+# [input] describes how the frontend's RF input is fed. `type` is one of:
+#   direct     - fixed voltage/tone only, no DiSEqC/Unicable addressing.
+#                Position switching, if any, comes from `diseqc` below.
+#   unicable   - EN50494 / Unicable I  (`slot`, `frequency`, optional `pin`)
+#   unicable2  - EN50607 / Unicable II / JESS (`slot`, `frequency`, optional `pin`)
+# unicable/unicable2 carry the position in their own addressing, so
+# `diseqc` is meaningless (and ignored) for those. For `direct`, `diseqc`
+# picks how position-switching happens - omit it entirely for a single
+# fixed LNB (or DVB-C, where there's no dish/switch at all):
+#   toneburst    - plain tone-burst switch (Mini-DiSEqC), 2 positions (A/B)
+#   committed    - DiSEqC 1.0 committed switch, up to 4 positions (A-D)
+#   uncommitted  - DiSEqC 1.1 uncommitted switch, up to 16 positions,
+#                  for larger cascaded multiswitch setups
+#
+# `slot` is 1-based, matching the numbering used on receivers/LNB menus
+# (slot 1 = user band id 0 on the wire).
+#
+# Each [[transponder]] sets its own `position` - a letter (A, B, C, ...)
+# matching the TUI's own sat-letter column exactly - for a combined scan
+# list spanning multiple satellites on the same multi-sat switch. Omitted
+# = "A" (single-satellite setups). Here everything is HotBird (13E), on
+# the "B" leg of the switch.
+
+[input]
+type = "unicable2"
+slot = 1
+frequency = 1210
+
+# Known-good HotBird (13E) muxes, used here as test targets.
+# `position = "B"` is the HotBird leg of this multi-satellite switch.
+
+[[transponder]]
+system = "S2"
+frequency = 10930
+polarization = "H"
+symbol_rate = 30000
+modulation = "QPSK"
+fec = "5/6"
+position = "B"
+
+[[transponder]]
+system = "S2"
+frequency = 11900
+polarization = "H"
+symbol_rate = 27500
+modulation = "8PSK"
+fec = "3/4"
+position = "B"
+
+[[transponder]]
+system = "S2"
+frequency = 11662
+polarization = "V"
+symbol_rate = 27500
+modulation = "8PSK"
+fec = "3/4"
+position = "B"
+
+[[transponder]]
+system = "S2"
+frequency = 10719.25
+polarization = "V"
+symbol_rate = 27500
+modulation = "8PSK"
+fec = "auto"
+position = "B"
+
+[[transponder]]
+system = "S2"
+frequency = 12635
+polarization = "V"
+symbol_rate = 30000
+modulation = "8PSK"
+fec = "5/6"
+rolloff = "0.20"
+position = "B"

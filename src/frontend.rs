@@ -67,6 +67,23 @@ impl Frontend {
         Ok(ioctl::get_property_data(self.fd(), ioctl::DTV_MODULATION)?)
     }
 
+    /// Reads back the code rate the demodulator settled on, or None if the
+    /// driver doesn't report one. Satellite drivers use DTV_INNER_FEC. DVB-T
+    /// drivers use DTV_CODE_RATE_HP, while T2 drivers vary between the two,
+    /// so terrestrial tries both.
+    pub fn detected_fec(&self, satellite: bool) -> Option<u32> {
+        let props: &[u32] = if satellite {
+            &[ioctl::DTV_INNER_FEC]
+        } else {
+            &[ioctl::DTV_CODE_RATE_HP, ioctl::DTV_INNER_FEC]
+        };
+        props.iter().find_map(|cmd| {
+            ioctl::get_property_data(self.fd(), *cmd)
+                .ok()
+                .filter(|f| !matches!(*f, ioctl::FEC_NONE | ioctl::FEC_AUTO))
+        })
+    }
+
     fn log(&self, msg: impl std::fmt::Display) {
         if self.verbose {
             eprintln!("  {msg}");

@@ -77,6 +77,42 @@ fec = "5/6"
 rolloff = "0.20"
 position = "B"
 
+[[transponder]]
+system = "S2"
+frequency = 11411.1
+polarization = "H"
+symbol_rate = 27500
+modulation = "8PSK"
+fec = "5/6"
+position = "B"
+
+[[transponder]]
+system = "S2"
+frequency = 11449.5
+polarization = "H"
+symbol_rate = 27500
+modulation = "8PSK"
+fec = "5/6"
+position = "B"
+
+[[transponder]]
+system = "S2"
+frequency = 11487.8
+polarization = "H"
+symbol_rate = 27500
+modulation = "8PSK"
+fec = "5/6"
+position = "B"
+
+[[transponder]]
+system = "S2"
+frequency = 11278.36
+polarization = "V"
+symbol_rate = 27500
+modulation = "8PSK"
+fec = "5/6"
+position = "B"
+
 # Astra (19.2E) muxes - see the multi-satellite switch mapping up top.
 
 [[transponder]]

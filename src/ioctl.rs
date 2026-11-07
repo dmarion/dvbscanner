@@ -32,6 +32,7 @@ pub const DTV_INNER_FEC: u32 = 9;
 pub const DTV_PILOT: u32 = 12;
 pub const DTV_ROLLOFF: u32 = 13;
 pub const DTV_DELIVERY_SYSTEM: u32 = 17;
+pub const DTV_CODE_RATE_HP: u32 = 36;
 pub const DTV_STREAM_ID: u32 = 42;
 pub const DTV_ENUM_DELSYS: u32 = 44;
 pub const DTV_STAT_SIGNAL_STRENGTH: u32 = 62;
@@ -79,6 +80,8 @@ pub const FEC_AUTO: u32 = 9;
 pub const FEC_3_5: u32 = 10;
 pub const FEC_9_10: u32 = 11;
 pub const FEC_2_5: u32 = 12;
+pub const FEC_1_3: u32 = 13;
+pub const FEC_1_4: u32 = 14;
 
 // ---- fe_pilot / fe_rolloff ----
 pub const PILOT_AUTO: u32 = 2;
